@@ -1,0 +1,199 @@
+<!-- index.html – 無外部日曆套件的純原生排班系統
+依賴：
+  • dayjs CDN（日期計算）
+  • Tailwind CDN（快速排版，可自行替換成傳統 CSS）
+此檔可直接雙擊開啟或部署至任何靜態主機。
+-->
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>排班系統 – Vanilla JS</title>
+    <!-- Tailwind (可移除自行撰寫 CSS) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- dayjs -->
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+  </head>
+  <body class="bg-gray-50 p-4 print:bg-white">
+    <!-- 控制列 -->
+    <div id="controls" class="flex flex-wrap gap-3 mb-4 print:hidden">
+      <input id="monthPicker" type="month" class="border rounded p-2" />
+      <button id="addEmployee" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">新增員工</button>
+      <button id="generate" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">產生排班</button>
+      <button onclick="window.print()" class="px-4 py-2 border rounded">列印</button>
+    </div>
+
+    <!-- 員工輸入表單 -->
+    <div id="employeeForm" class="space-y-2 max-w-xl print:hidden"></div>
+
+    <!-- 月曆表格 -->
+    <div id="calendar" class="mt-6 overflow-x-auto">
+      <table id="scheduleTable" class="w-full border-collapse"></table>
+    </div>
+
+    <script>
+      // ===== 參數設定 =====
+      const SHIFT_TIMES = [
+        { label: "早", hour: 8 },
+        { label: "午", hour: 14 },
+        { label: "晚", hour: 20 },
+      ];
+
+      // ===== 初始化 =====
+      const monthPicker = document.getElementById("monthPicker");
+      monthPicker.value = dayjs().format("YYYY-MM");
+
+      const employeeContainer = document.getElementById("employeeForm");
+
+      function addEmployeeRow(data = { name: "", shifts: "", emoji: "" }) {
+        const row = document.createElement("div");
+        row.className = "grid grid-cols-3 gap-2";
+        row.innerHTML = `
+          <input placeholder="姓名" value="${data.name}" class="border p-2 rounded" />
+          <input type="number" placeholder="月班次" value="${data.shifts}" class="border p-2 rounded" />
+          <input placeholder="Emoji" value="${data.emoji}" class="border p-2 rounded" />
+        `;
+        employeeContainer.appendChild(row);
+      }
+      // 預設一列
+      addEmployeeRow();
+
+      document.getElementById("addEmployee").onclick = () => addEmployeeRow();
+
+      // ===== 排班邏輯 =====
+      function generateSchedule() {
+        const month = monthPicker.value;
+        if (!month) {
+          alert("請先選擇月份");
+          return;
+        }
+
+        // 讀取員工資料
+        const employees = Array.from(employeeContainer.children).map((row) => {
+          const [nameInput, shiftsInput, emojiInput] = row.querySelectorAll("input");
+          return {
+            name: nameInput.value.trim() || "(未命名)",
+            shifts: Number(shiftsInput.value),
+            emoji: emojiInput.value.trim() || "",
+          };
+        });
+
+        // 驗證班次總數
+        const totalRequired = employees.reduce((s, e) => s + (e.shifts || 0), 0);
+        const daysInMonth = dayjs(month + "-01").daysInMonth();
+        const totalSlots = daysInMonth * SHIFT_TIMES.length;
+        if (totalRequired !== totalSlots) {
+          alert(`本月共有 ${totalSlots} 個班次，但員工總需求為 ${totalRequired}。請調整。`);
+          return;
+        }
+
+        // 建立班次 pool
+        let pool = [];
+        for (let d = 1; d <= daysInMonth; d++) {
+          SHIFT_TIMES.forEach((st) => {
+            const dateStr = dayjs(`${month}-${String(d).padStart(2, "0")}`)
+              .hour(st.hour)
+              .minute(0)
+              .second(0)
+              .format();
+            pool.push({ date: dateStr });
+          });
+        }
+        // 隨機打散
+        pool.sort(() => Math.random() - 0.5);
+
+        // 分配班次
+        const events = [];
+        employees.forEach((emp) => {
+          for (let i = 0; i < emp.shifts; i++) {
+            const slot = pool.pop();
+            events.push({
+              title: emp.emoji || emp.name,
+              start: slot.date,
+              employee: emp.name,
+            });
+          }
+        });
+
+        // 渲染月曆
+        renderCalendar(month, events);
+      }
+
+      document.getElementById("generate").onclick = generateSchedule;
+
+      // ===== 自行渲染月曆表格 =====
+      function renderCalendar(month, events) {
+        const table = document.getElementById("scheduleTable");
+        table.innerHTML = ""; // 清空
+
+        const startOfMonth = dayjs(month + "-01");
+        const daysInMonth = startOfMonth.daysInMonth();
+        const firstDayWeekday = startOfMonth.day(); // 0: Sunday
+
+        // 表頭（星期）
+        const thead = document.createElement("thead");
+        const headerRow = document.createElement("tr");
+        ["日", "一", "二", "三", "四", "五", "六"].forEach((d) => {
+          const th = document.createElement("th");
+          th.className = "p-2 border bg-gray-100 text-center";
+          th.textContent = d;
+          headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        let currentDay = 0;
+        let row;
+
+        // 最多 6 週 * 7 = 42 格
+        for (let cell = 0; cell < 42; cell++) {
+          if (cell % 7 === 0) {
+            row = document.createElement("tr");
+            tbody.appendChild(row);
+          }
+
+          const td = document.createElement("td");
+          td.className = "align-top border h-36 w-48 p-1";
+
+          if (cell >= firstDayWeekday && currentDay < daysInMonth) {
+            currentDay++;
+            const date = startOfMonth.date(currentDay);
+            const dateStr = date.format("YYYY-MM-DD");
+
+            // 日期標題
+            const dateHeader = document.createElement("div");
+            dateHeader.className = "text-sm font-semibold mb-1";
+            dateHeader.textContent = currentDay;
+            td.appendChild(dateHeader);
+
+            // 各班次
+            SHIFT_TIMES.forEach((st) => {
+              const shiftDiv = document.createElement("div");
+              shiftDiv.className = "text-center text-xl my-1";
+              const ev = events.find(
+                (e) =>
+                  dayjs(e.start).format("YYYY-MM-DD") === dateStr &&
+                  dayjs(e.start).hour() === st.hour
+              );
+              shiftDiv.textContent = ev ? ev.title : "";
+              td.appendChild(shiftDiv);
+            });
+          }
+          row.appendChild(td);
+        }
+        table.appendChild(tbody);
+      }
+
+      // ===== 列印樣式 =====
+      const style = document.createElement("style");
+      style.textContent = `
+        @media print {
+          #controls, #employeeForm { display: none !important; }
+        }
+      `;
+      document.head.appendChild(style);
+    </script>
+  </body>
+</html>
