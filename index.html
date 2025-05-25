@@ -39,6 +39,8 @@
         { label: "午", hour: 14 },
         { label: "晚", hour: 20 },
       ];
+      // 0: Sunday, 1: Monday, ... 週一公休
+      const OFF_DAY = 1;
 
       // ===== 初始化 =====
       const monthPicker = document.getElementById("monthPicker");
@@ -79,26 +81,27 @@
           };
         });
 
-        // 驗證班次總數
-        const totalRequired = employees.reduce((s, e) => s + (e.shifts || 0), 0);
         const daysInMonth = dayjs(month + "-01").daysInMonth();
-        const totalSlots = daysInMonth * SHIFT_TIMES.length;
-        if (totalRequired !== totalSlots) {
-          alert(`本月共有 ${totalSlots} 個班次，但員工總需求為 ${totalRequired}。請調整。`);
-          return;
-        }
 
-        // 建立班次 pool
+        // 建立班次 pool（週一公休）
         let pool = [];
         for (let d = 1; d <= daysInMonth; d++) {
+          const dateObj = dayjs(`${month}-${String(d).padStart(2, "0")}`);
+          if (dateObj.day() === OFF_DAY) continue; // skip Mondays
           SHIFT_TIMES.forEach((st) => {
-            const dateStr = dayjs(`${month}-${String(d).padStart(2, "0")}`)
+            const dateStr = dateObj
               .hour(st.hour)
               .minute(0)
               .second(0)
               .format();
             pool.push({ date: dateStr });
           });
+        }
+        const totalSlots = pool.length;
+        const totalRequired = employees.reduce((s, e) => s + (e.shifts || 0), 0);
+        if (totalRequired !== totalSlots) {
+          alert(`本月共有 ${totalSlots} 個班次，但員工總需求為 ${totalRequired}。請調整。`);
+          return;
         }
         // 隨機打散
         pool.sort(() => Math.random() - 0.5);
@@ -168,18 +171,25 @@
             dateHeader.textContent = currentDay;
             td.appendChild(dateHeader);
 
-            // 各班次
-            SHIFT_TIMES.forEach((st) => {
-              const shiftDiv = document.createElement("div");
-              shiftDiv.className = "text-center text-xl my-1";
-              const ev = events.find(
-                (e) =>
-                  dayjs(e.start).format("YYYY-MM-DD") === dateStr &&
-                  dayjs(e.start).hour() === st.hour
-              );
-              shiftDiv.textContent = ev ? ev.title : "";
-              td.appendChild(shiftDiv);
-            });
+            // 各班次或公休
+            if (date.day() === OFF_DAY) {
+              const offDiv = document.createElement("div");
+              offDiv.className = "text-center text-gray-400 mt-4";
+              offDiv.textContent = "休";
+              td.appendChild(offDiv);
+            } else {
+              SHIFT_TIMES.forEach((st) => {
+                const shiftDiv = document.createElement("div");
+                shiftDiv.className = "text-center text-xl my-1";
+                const ev = events.find(
+                  (e) =>
+                    dayjs(e.start).format("YYYY-MM-DD") === dateStr &&
+                    dayjs(e.start).hour() === st.hour
+                );
+                shiftDiv.textContent = ev ? ev.title : "";
+                td.appendChild(shiftDiv);
+              });
+            }
           }
           row.appendChild(td);
         }
